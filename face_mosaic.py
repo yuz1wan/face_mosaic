@@ -601,15 +601,20 @@ class FaceMosaicProcessor:
             sample_interval (int): 采样间隔（帧数），默认每30帧(约1秒)检测一次
             
         Returns:
-            bool: 是否检测到人脸
+            tuple: (是否检测到人脸, 首次检测到的时间戳秒)
         """
         try:
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
-                return False
+                return False, None
+            
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            if fps <= 0:
+                fps = 30  # Fallback if fps cannot be read
             
             frame_count = 0
             has_face = False
+            timestamp = None
             
             while True:
                 ret, frame = cap.read()
@@ -623,17 +628,18 @@ class FaceMosaicProcessor:
                     
                     if results.detections:
                         has_face = True
+                        timestamp = frame_count / fps
                         break
                 
                 frame_count += 1
             
             cap.release()
-            return has_face
+            return has_face, timestamp
             
         except Exception as e:
             # 静默失败或打印错误，视需求而定
             # print(f"❌ 检查视频时出错 {video_path}: {e}")
-            return False
+            return False, None
 
     def scan_directory_for_faces(self, folder_path):
         """
@@ -656,9 +662,19 @@ class FaceMosaicProcessor:
         
         # 使用tqdm显示进度
         for video_path in tqdm(video_files, desc="扫描进度"):
-            if self.check_video_has_face(video_path):
+            has_face, timestamp = self.check_video_has_face(video_path)
+            if has_face:
+                # 格式化时间
+                if timestamp is not None:
+                    hours = int(timestamp // 3600)
+                    minutes = int((timestamp % 3600) // 60)
+                    seconds = int(timestamp % 60)
+                    time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                else:
+                    time_str = "未知"
+                
                 # 使用tqdm.write避免打断进度条
-                tqdm.write(f"[发现人脸] {video_path}")
+                tqdm.write(f"[发现人脸] {video_path} (时间: {time_str})")
                 found_count += 1
         
         print("-" * 60)

@@ -5,6 +5,7 @@ import os
 import glob
 import argparse
 import sys
+import shutil
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
@@ -35,7 +36,7 @@ def process_single_video(processor, input_path, output_dir, overwrite):
 def process_task(args):
     """
     包装函数用于多线程执行
-    args: (input_path, output_path, processor_args)
+    args: (input_path, output_path, overwrite, processor_config)
     """
     input_path, final_output_path, overwrite, processor_config = args
     
@@ -43,6 +44,23 @@ def process_task(args):
     processor = FaceMosaicProcessor(**processor_config)
     
     try:
+        # 1. 预先检测人脸
+        # 使用默认的采样间隔（30帧）进行快速检测
+        has_face, _ = processor.check_video_has_face(input_path)
+        
+        if not has_face:
+            # 如果没有检测到人脸
+            if overwrite or os.path.abspath(input_path) == os.path.abspath(final_output_path):
+                # 覆盖模式：不需要做任何事，直接跳过
+                return True, f"跳过 (无从脸): {Path(input_path).name}"
+            else:
+                # 输出到新目录模式：直接复制原文件，保持目录结构完整
+                os.makedirs(os.path.dirname(final_output_path), exist_ok=True)
+                if not os.path.exists(final_output_path):
+                    shutil.copy2(input_path, final_output_path)
+                return True, f"复制 (无人脸): {Path(input_path).name}"
+
+        # 2. 检测到人脸，开始打马赛克处理
         temp_output_path = final_output_path
         
         # 如果是覆盖模式或者输出路径等于输入路径
@@ -54,8 +72,6 @@ def process_task(args):
         os.makedirs(os.path.dirname(temp_output_path), exist_ok=True)
         
         # 处理视频
-        # 为了减少日志输出，可以重定向 stdout/stderr，或者修改 face_mosaic.py
-        # 这里我们直接调用，接受日志输出
         success = processor.process_video(input_path, temp_output_path)
         
         if success:

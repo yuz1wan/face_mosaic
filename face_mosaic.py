@@ -592,6 +592,78 @@ class FaceMosaicProcessor:
             print(f"❌ 批量处理时出错: {e}")
             return False
 
+    def check_video_has_face(self, video_path, sample_interval=30):
+        """
+        检查视频是否包含人脸
+        
+        Args:
+            video_path (str): 视频文件路径
+            sample_interval (int): 采样间隔（帧数），默认每30帧(约1秒)检测一次
+            
+        Returns:
+            bool: 是否检测到人脸
+        """
+        try:
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                return False
+            
+            frame_count = 0
+            has_face = False
+            
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                
+                # 仅在采样点进行检测
+                if frame_count % sample_interval == 0:
+                    rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    results = self.face_detection.process(rgb_image)
+                    
+                    if results.detections:
+                        has_face = True
+                        break
+                
+                frame_count += 1
+            
+            cap.release()
+            return has_face
+            
+        except Exception as e:
+            # 静默失败或打印错误，视需求而定
+            # print(f"❌ 检查视频时出错 {video_path}: {e}")
+            return False
+
+    def scan_directory_for_faces(self, folder_path):
+        """
+        扫描目录中的所有视频，输出包含人脸的视频路径
+        
+        Args:
+            folder_path (str): 目录路径
+        """
+        print(f"🔍 开始扫描目录: {folder_path}")
+        video_files = self.find_video_files(folder_path)
+        
+        if not video_files:
+            print("❌ 未找到视频文件")
+            return
+            
+        print(f"📁 找到 {len(video_files)} 个视频文件，开始检测...")
+        print("-" * 60)
+        
+        found_count = 0
+        
+        # 使用tqdm显示进度
+        for video_path in tqdm(video_files, desc="扫描进度"):
+            if self.check_video_has_face(video_path):
+                # 使用tqdm.write避免打断进度条
+                tqdm.write(f"[发现人脸] {video_path}")
+                found_count += 1
+        
+        print("-" * 60)
+        print(f"✅ 扫描完成。共发现 {found_count} 个包含人脸的视频。")
+
 
 def main():
     """主函数"""
@@ -606,12 +678,20 @@ def main():
     
     # 批量处理参数
     parser.add_argument("--batch-folder", help="批量处理文件夹路径，处理文件夹内所有视频")
+    parser.add_argument("--scan", help="扫描指定目录下的视频，检查是否包含人脸并输出路径")
     parser.add_argument("--max-workers", type=int, default=4, help="最大并发处理数 (默认: 4)")
     
     args = parser.parse_args()
     
     # 参数验证
-    if args.batch_folder:
+    if args.scan:
+        if not os.path.exists(args.scan):
+            print(f"❌ 扫描目录不存在: {args.scan}")
+            sys.exit(1)
+        if not os.path.isdir(args.scan):
+            print(f"❌ 扫描路径不是文件夹: {args.scan}")
+            sys.exit(1)
+    elif args.batch_folder:
         # 批量处理模式
         if not os.path.exists(args.batch_folder):
             print(f"❌ 批量处理文件夹不存在: {args.batch_folder}")
@@ -648,10 +728,14 @@ def main():
     )
     
     print("🚀 人脸自动打马赛克工具启动")
-    print(f"⚙️  配置: 置信度={args.confidence}, 马赛克大小={args.mosaic_size}")
+    if not args.scan:
+        print(f"⚙️  配置: 置信度={args.confidence}, 马赛克大小={args.mosaic_size}")
     
     try:
-        if args.batch_folder:
+        if args.scan:
+            # 扫描模式
+            processor.scan_directory_for_faces(args.scan)
+        elif args.batch_folder:
             # 批量处理模式
             print(f"📁 批量处理模式: {args.batch_folder}")
             print(f"🔄 并发处理数: {args.max_workers}")
